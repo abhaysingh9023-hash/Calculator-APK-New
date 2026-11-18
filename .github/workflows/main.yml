@@ -1,0 +1,269 @@
+
+name: Build Calculator APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Accept Android Licenses and Install SDK
+        shell: bash
+        run: |
+          set -e
+
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          fi
+
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "Android SDK Manager not found"
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+
+          "$SDKMANAGER" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "platform-tools"
+
+      - name: Generate Calculator Project
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p app/src/main/assets
+          mkdir -p app/src/main/java/com/example/calculator
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "Calculator"
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.example.calculator'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.example.calculator'
+                  minSdk 23
+                  targetSdk 35
+                  versionCode 1
+                  versionName '1.0'
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:label="Calculator"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar"
+                  android:allowBackup="false">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/example/calculator/MainActivity.java <<'EOF'
+          package com.example.calculator;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.WebView;
+          import android.webkit.WebSettings;
+          import android.graphics.Color;
+
+          public class MainActivity extends Activity {
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  getWindow().setStatusBarColor(Color.rgb(17,24,39));
+                  getWindow().setNavigationBarColor(Color.rgb(17,24,39));
+
+                  WebView web = new WebView(this);
+                  web.setBackgroundColor(Color.rgb(17,24,39));
+                  web.getSettings().setJavaScriptEnabled(true);
+                  web.loadUrl("file:///android_asset/index.html");
+
+                  setContentView(web);
+              }
+          }
+          EOF
+
+          cat > app/src/main/assets/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Calculator</title>
+          <style>
+          *{box-sizing:border-box}
+          body{
+            margin:0;min-height:100vh;padding:16px;
+            display:flex;align-items:center;justify-content:center;
+            background:#111827;font-family:Arial,sans-serif
+          }
+          .calculator{
+            width:100%;max-width:400px;padding:20px;
+            border-radius:24px;background:#1f2937
+          }
+          h2{text-align:center;color:#fbbf24}
+          #display{
+            width:100%;height:95px;margin-bottom:18px;
+            border:0;border-radius:14px;background:#0b1220;
+            color:white;text-align:right;font-size:32px;padding:12px
+          }
+          .buttons{
+            display:grid;grid-template-columns:repeat(4,1fr);
+            gap:10px
+          }
+          button{
+            height:68px;border:0;border-radius:14px;
+            background:#374151;color:white;font-size:24px;
+            font-weight:bold
+          }
+          .op{background:#f59e0b;color:#111827}
+          .clear{background:#ef4444}
+          .equal{background:#10b981}
+          p{text-align:center;color:#9ca3af;font-size:12px}
+          </style>
+          </head>
+          <body>
+          <div class="calculator">
+          <h2>CALCULATOR</h2>
+          <input id="display" value="0" readonly>
+          <div class="buttons">
+          <button class="clear" onclick="clearAll()">C</button>
+          <button onclick="del()">⌫</button>
+          <button class="op" onclick="add('%')">%</button>
+          <button class="op" onclick="add('/')">÷</button>
+          <button onclick="add('7')">7</button>
+          <button onclick="add('8')">8</button>
+          <button onclick="add('9')">9</button>
+          <button class="op" onclick="add('*')">×</button>
+          <button onclick="add('4')">4</button>
+          <button onclick="add('5')">5</button>
+          <button onclick="add('6')">6</button>
+          <button class="op" onclick="add('-')">−</button>
+          <button onclick="add('1')">1</button>
+          <button onclick="add('2')">2</button>
+          <button onclick="add('3')">3</button>
+          <button class="op" onclick="add('+')">+</button>
+          <button onclick="add('00')">00</button>
+          <button onclick="add('0')">0</button>
+          <button onclick="add('.')">.</button>
+          <button class="equal" onclick="calculate()">=</button>
+          </div>
+          <p>Calculator Version 1.0</p>
+          </div>
+          <script>
+          let exp='';
+          const display=document.getElementById('display');
+          function update(){display.value=exp||'0'}
+          function add(v){
+            if(exp==='Error')exp='';
+            if('+-*/%'.includes(v)&&v.length===1){
+              if(!exp&&v!=='-')return;
+              if('+-*/%'.includes(exp.slice(-1)))
+                exp=exp.slice(0,-1);
+            }
+            if(v==='.'){
+              if(exp.split(/[+\-*/%]/).pop().includes('.'))return;
+            }
+            if(exp.length<100)exp+=v;
+            update();
+          }
+          function clearAll(){exp='';update()}
+          function del(){
+            exp=exp==='Error'?'':exp.slice(0,-1);
+            update();
+          }
+          function calculate(){
+            if(!exp)return;
+            try{
+              if(!/^[0-9+\-*/%.]+$/.test(exp))throw 0;
+              if(/[+\-*/%.]$/.test(exp))throw 0;
+              const result=Function('"use strict";return ('+exp+')')();
+              if(!Number.isFinite(result))throw 0;
+              exp=String(Number(result.toPrecision(12)));
+            }catch(e){exp='Error'}
+            update();
+          }
+          </script>
+          </body>
+          </html>
+          EOF
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Calculator-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+          
